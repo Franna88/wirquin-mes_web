@@ -6,6 +6,7 @@ import '../providers/equipment_provider.dart';
 import '../models/maintenance_category.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
+import '../data/machine_checklists.dart';
 
 class ChecklistProvider extends ChangeNotifier {
   Map<String, List<ChecklistItem>> _checklistItems = {};
@@ -157,6 +158,11 @@ class ChecklistProvider extends ChangeNotifier {
 
   List<ChecklistItem> getItemsForEquipment(String equipmentId) {
     return _checklistItems.values.expand((items) => items).where((item) => item.equipmentId == equipmentId).toList();
+  }
+
+  // Alias for getItemsForEquipment
+  List<ChecklistItem> getChecklistItemsForEquipment(String equipmentId) {
+    return getItemsForEquipment(equipmentId);
   }
 
   List<ChecklistItem> getItemsForCategory(String equipmentId, String categoryName) {
@@ -884,6 +890,42 @@ class ChecklistProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error extracting checklist items from EquipmentProvider: $e');
+    }
+  }
+
+  /// Creates and saves checklist items for a machine type
+  Future<void> createMachineChecklists(String equipmentId, String machineType) async {
+    // Generate all checklist items for this machine type
+    final items = MachineChecklists.initializeAllChecklistsForMachine(equipmentId, machineType);
+    
+    // Save the items
+    for (var item in items) {
+      await addItem(item);
+    }
+    
+    notifyListeners();
+  }
+
+  /// Gets checklist items for a specific machine type, equipment, and frequency
+  List<ChecklistItem> getMachineChecklistItems(String equipmentId, String machineType, ChecklistFrequency frequency) {
+    return _checklistItems.values.expand((items) => items).where((item) => 
+      item.equipmentId == equipmentId && 
+      item.categoryName == machineType &&
+      item.frequency == frequency
+    ).toList();
+  }
+
+  /// Updates an existing checklist item
+  Future<void> updateChecklistItem(ChecklistItem item) async {
+    // Find the item across all lists
+    for (var entry in _checklistItems.entries) {
+      final index = entry.value.indexWhere((i) => i.id == item.id);
+      if (index != -1) {
+        entry.value[index] = item;
+        await _saveItems();
+        notifyListeners();
+        return;
+      }
     }
   }
 } 

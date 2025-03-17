@@ -5,210 +5,323 @@ import '../models/equipment.dart';
 import 'equipment_detail_screen.dart';
 import 'category_list_screen.dart';
 
-class EquipmentListScreen extends StatelessWidget {
-  const EquipmentListScreen({super.key});
+class EquipmentListScreen extends StatefulWidget {
+  const EquipmentListScreen({Key? key}) : super(key: key);
+
+  @override
+  State<EquipmentListScreen> createState() => _EquipmentListScreenState();
+}
+
+class _EquipmentListScreenState extends State<EquipmentListScreen> with SingleTickerProviderStateMixin {
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  late AnimationController _animationController;
+  
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _animationController.forward();
+  }
+  
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _animationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Equipment List'),
+        elevation: 0,
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Search equipment...',
+                  hintStyle: TextStyle(color: Colors.grey.shade300),
+                  border: InputBorder.none,
+                ),
+                style: const TextStyle(color: Colors.white),
+                onChanged: (value) {
+                  setState(() {});
+                },
+              )
+            : const Text(
+                'Equipment List',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+        actions: [
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: Consumer<EquipmentProvider>(
-        builder: (ctx, equipmentProvider, _) {
-          if (equipmentProvider.isLoading) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+        builder: (context, equipmentProvider, child) {
+          var equipment = equipmentProvider.equipmentList;
+          
+          // Filter equipment based on search
+          if (_isSearching && _searchController.text.isNotEmpty) {
+            final query = _searchController.text.toLowerCase();
+            equipment = equipment.where((item) {
+              return item.name.toLowerCase().contains(query) ||
+                     item.location.toLowerCase().contains(query) ||
+                     item.status.toLowerCase().contains(query);
+            }).toList();
           }
-
-          if (equipmentProvider.error.isNotEmpty) {
-            return Center(
-              child: Text(
-                'Error: ${equipmentProvider.error}',
-                style: const TextStyle(color: Colors.red),
-              ),
-            );
-          }
-
-          final equipmentList = equipmentProvider.equipmentList;
-
-          if (equipmentList.isEmpty) {
+          
+          if (equipment.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(
-                    Icons.engineering_outlined,
-                    size: 100,
-                    color: Colors.grey,
+                  Icon(
+                    _isSearching && _searchController.text.isNotEmpty
+                        ? Icons.search_off
+                        : Icons.inventory_2_outlined,
+                    size: 80,
+                    color: Colors.grey.shade400,
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'No equipment found',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(height: 16),
+                  Text(
+                    _isSearching && _searchController.text.isNotEmpty
+                        ? 'No matching equipment found'
+                        : 'No equipment available',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: Colors.grey.shade600,
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(
-                      'Add your first equipment to get started with maintenance tracking',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                  ElevatedButton.icon(
-                    onPressed: () => _navigateToAddEquipment(context),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Equipment'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 30,
-                        vertical: 15,
+                  if (!_isSearching || _searchController.text.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        'Add some equipment to get started',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey.shade500,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             );
           }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: equipmentList.length,
-            itemBuilder: (ctx, index) {
-              final equipment = equipmentList[index];
-              return Card(
-                elevation: 3,
-                margin: const EdgeInsets.only(bottom: 16),
-                child: InkWell(
-                  onTap: () => _navigateToCategories(context, equipment.id),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                equipment.name,
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            _buildStatusChip(equipment.status),
-                          ],
+          
+          return Container(
+            color: Colors.grey.shade50,
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: equipment.length,
+                  itemBuilder: (ctx, index) {
+                    // Staggered animation
+                    final delay = index * 0.1;
+                    final slideAnimation = Tween<Offset>(
+                      begin: const Offset(-0.5, 0),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: _animationController,
+                        curve: Interval(
+                          delay.clamp(0.0, 0.9),
+                          (delay + 0.4).clamp(0.0, 1.0),
+                          curve: Curves.easeOutQuart,
                         ),
-                        const SizedBox(height: 8),
-                        if (equipment.location.isNotEmpty) ...[
-                          Text('Location: ${equipment.location}'),
-                          const SizedBox(height: 4),
-                        ],
-                        if (equipment.model.isNotEmpty) ...[
-                          Text('Model: ${equipment.model}'),
-                          const SizedBox(height: 4),
-                        ],
-                        if (equipment.lastMaintenanceDate.isNotEmpty) ...[
-                          Text('Last Maintenance: ${equipment.lastMaintenanceDate}'),
-                          const SizedBox(height: 4),
-                        ],
-                        const SizedBox(height: 8),
-                        Text(
-                          'Maintenance Categories: ${equipmentProvider.getCategoriesForEquipment(equipment.id).length}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () {
-                                _navigateToCategories(context, equipment.id);
-                              },
-                              icon: const Icon(Icons.checklist),
-                              label: const Text('Maintenance'),
-                            ),
-                            TextButton.icon(
-                              onPressed: () {
-                                _navigateToEditEquipment(context, equipment);
-                              },
-                              icon: const Icon(Icons.edit),
-                              label: const Text('Edit'),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton.icon(
-                              onPressed: () {
-                                _showDeleteConfirmation(context, equipment);
-                              },
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              label: const Text(
-                                'Delete',
-                                style: TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
+                      ),
+                    );
+                    
+                    return SlideTransition(
+                      position: slideAnimation,
+                      child: FadeTransition(
+                        opacity: _animationController,
+                        child: _buildEquipmentCard(equipment[index]),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _navigateToAddEquipment(context),
-        child: const Icon(Icons.add),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EquipmentDetailScreen(),
+            ),
+          ).then((_) => setState(() {}));
+        },
+        label: const Text('Add Equipment'),
+        icon: const Icon(Icons.add),
+        backgroundColor: Theme.of(context).colorScheme.primary,
       ),
     );
   }
 
-  Widget _buildStatusChip(String status) {
-    Color color;
-    String label;
-
-    switch (status.toLowerCase()) {
-      case 'operational':
-        color = Colors.green;
-        label = 'Operational';
+  Widget _buildEquipmentCard(Equipment equipment) {
+    Color statusColor;
+    IconData statusIcon;
+    String displayStatus = equipment.status;
+    
+    // Use exact string matching for statuses with translation of "Out of Service" to "Toilet Seat"
+    switch (equipment.status) {
+      case 'Operational':
+        statusColor = const Color(0xFF43A047);
+        statusIcon = Icons.check_circle_rounded;
         break;
-      case 'maintenance':
-        color = Colors.orange;
-        label = 'Maintenance';
+      case 'Maintenance':
+        statusColor = const Color(0xFFFB8C00);
+        statusIcon = Icons.engineering_rounded;
         break;
-      case 'out of service':
-        color = Colors.red;
-        label = 'Out of Service';
-        break;
-      case 'standby':
-        color = Colors.blue;
-        label = 'Standby';
+      case 'Out of Service':
+        statusColor = const Color(0xFFE53935);
+        statusIcon = Icons.do_not_disturb_on_rounded;
+        displayStatus = 'Toilet Seat';
         break;
       default:
-        color = Colors.grey;
-        label = status;
+        statusColor = Colors.grey;
+        statusIcon = Icons.help_outline_rounded;
     }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
+    
+    return Card(
+      elevation: 3,
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: statusColor.withOpacity(0.2),
+          width: 1,
+        ),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EquipmentDetailScreen(equipment: equipment),
+            ),
+          ).then((_) => setState(() {}));
+        },
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                statusColor.withOpacity(0.05),
+              ],
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(statusIcon, color: statusColor, size: 30),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      equipment.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: 14,
+                          color: Colors.grey.shade600,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            equipment.location,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today_outlined,
+                          size: 14,
+                          color: Colors.grey.shade600,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          equipment.lastMaintenanceDate,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: statusColor.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  displayStatus,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -5,6 +5,7 @@ import '../providers/equipment_provider.dart';
 import '../providers/checklist_provider.dart';
 import '../models/equipment.dart';
 import '../models/maintenance_category.dart';
+import '../data/machine_checklists.dart';
 import 'checklist_screen.dart';
 import 'machine_checklist_screen.dart';
 
@@ -38,7 +39,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
   final List<String> _statusOptions = [
     'Operational',
     'Maintenance',
-    'Out of Service',
+    'Toilet Seat',
     'Standby',
   ];
 
@@ -113,19 +114,46 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
         listen: false,
       );
       
-      equipmentProvider.addOrUpdateEquipment(equipment).then((_) {
+      equipmentProvider.addOrUpdateEquipment(equipment).then((_) async {
         // Remove any duplicate maintenance categories
-        equipmentProvider.removeDuplicateCategories().then((_) {
-          // Show a success message
+        await equipmentProvider.removeDuplicateCategories();
+        
+        // If this is a new equipment, generate checklists for all types (IM, BT, TER)
+        if (widget.equipment == null) {
+          debugPrint('Generating checklists for new equipment: $_id');
+          
+          // Create checklist provider reference
+          final checklistProvider = Provider.of<ChecklistProvider>(
+            context, 
+            listen: false
+          );
+          
+          // Generate checklists for all three types
+          for (final type in ['IM', 'BT', 'TER']) {
+            debugPrint('Generating $type checklists');
+            
+            final items = MachineChecklists.initializeAllChecklistsForMachine(_id, type);
+            
+            // Add each item to the provider
+            for (var item in items) {
+              await checklistProvider.addItem(item);
+            }
+          }
+          
+          debugPrint('Checklists generation completed');
+        }
+        
+        // Show a success message
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Equipment saved and duplicate categories removed'),
+              content: Text('Equipment saved with all checklists'),
               backgroundColor: Colors.green,
             ),
           );
           // Navigate back to the previous screen
           Navigator.of(context).pop();
-        });
+        }
       });
     }
   }
@@ -266,26 +294,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: _status,
-                  decoration: const InputDecoration(
-                    labelText: 'Status',
-                  ),
-                  items: _statusOptions.map((status) {
-                    return DropdownMenuItem<String>(
-                      value: status,
-                      child: Text(status),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _status = value!;
-                    });
-                  },
-                  onSaved: (value) {
-                    _status = value!;
-                  },
-                ),
+                _buildStatusDropdown(),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   value: _machineType,
@@ -328,6 +337,91 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildStatusDropdown() {
+    String displayValue = widget.equipment?.status ?? _status;
+    
+    // Convert "Out of Service" to "Toilet Seat" for display purposes
+    if (displayValue == 'Out of Service') {
+      displayValue = 'Toilet Seat';
+    }
+  
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade200,
+            blurRadius: 5.0,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: displayValue,
+          isDense: true,
+          borderRadius: BorderRadius.circular(12),
+          icon: const Icon(Icons.arrow_drop_down_circle_outlined),
+          elevation: 2,
+          style: const TextStyle(color: Colors.black87),
+          onChanged: (String? newValue) {
+            setState(() {
+              // Convert "Toilet Seat" back to "Out of Service" for storage
+              String valueToStore = newValue!;
+              if (newValue == 'Toilet Seat') {
+                valueToStore = 'Out of Service';
+              }
+              
+              _status = valueToStore;
+            });
+          },
+          items: _statusOptions.map<DropdownMenuItem<String>>((String value) {
+            Color itemColor;
+            IconData statusIcon;
+            
+            switch (value) {
+              case 'Operational':
+                itemColor = Colors.green;
+                statusIcon = Icons.check_circle_rounded;
+                break;
+              case 'Maintenance':
+                itemColor = Colors.orange;
+                statusIcon = Icons.engineering_rounded;
+                break;
+              case 'Toilet Seat':
+                itemColor = Colors.red;
+                statusIcon = Icons.do_not_disturb_on_rounded;
+                break;
+              default:
+                itemColor = Colors.grey;
+                statusIcon = Icons.help_outline_rounded;
+            }
+            
+            return DropdownMenuItem<String>(
+              value: value,
+              child: Row(
+                children: [
+                  Icon(statusIcon, color: itemColor, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      color: itemColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
         ),
       ),
     );
@@ -376,51 +470,149 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        // Only show machine-specific checklist button if this is a machine-type equipment
-        if (_machineType != 'General') ...[
-          Card(
-            margin: const EdgeInsets.only(bottom: 16),
-            color: Colors.blue.shade50,
-            child: ListTile(
-              title: Text('${_machineType} Checklists'),
-              subtitle: const Text('Machine-specific maintenance tasks'),
-              trailing: const Icon(Icons.engineering),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => MachineChecklistScreen(
-                      equipmentId: _id,
-                      machineType: _machineType,
-                    ),
-                  ),
-                );
-              },
-            ),
+        
+        // Direct access to machine checklists - no expansion needed
+        const Text(
+          'Machine Checklists',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
           ),
-        ],
+        ),
+        const SizedBox(height: 8),
+        
+        // Inspection & Maintenance (IM)
+        Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.blue.shade200),
+          ),
+          child: ListTile(
+            leading: Icon(Icons.engineering, color: Colors.blue.shade700),
+            title: const Text('Inspection & Maintenance (IM)'),
+            subtitle: const Text('Detailed equipment inspection tasks'),
+            trailing: const Icon(Icons.arrow_forward_ios),
+            tileColor: Colors.blue.shade50,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MachineChecklistScreen(
+                    equipmentId: _id,
+                    machineType: 'IM',
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        
+        // Basic Tasks (BT)
+        Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.green.shade200),
+          ),
+          child: ListTile(
+            leading: Icon(Icons.build_rounded, color: Colors.green.shade700),
+            title: const Text('Basic Tasks (BT)'),
+            subtitle: const Text('Routine maintenance activities'),
+            trailing: const Icon(Icons.arrow_forward_ios),
+            tileColor: Colors.green.shade50,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MachineChecklistScreen(
+                    equipmentId: _id,
+                    machineType: 'BT',
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        
+        // Technical Equipment Review (TER)
+        Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.orange.shade200),
+          ),
+          child: ListTile(
+            leading: Icon(Icons.checklist_rounded, color: Colors.orange.shade700),
+            title: const Text('Technical Equipment Review (TER)'),
+            subtitle: const Text('Comprehensive technical assessments'),
+            trailing: const Icon(Icons.arrow_forward_ios),
+            tileColor: Colors.orange.shade50,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MachineChecklistScreen(
+                    equipmentId: _id,
+                    machineType: 'TER',
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        const Text(
+          'Custom Maintenance Categories',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        
         // Regular maintenance categories
-        ...categories.map((category) {
-          return Card(
+        if (categories.isEmpty)
+          Card(
+            elevation: 1,
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
-              title: Text(category.type.fullName),
-              subtitle: Text('Category Code: ${category.type.code}'),
-              trailing: const Icon(Icons.arrow_forward_ios),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChecklistScreen(
-                      equipmentId: _id,
-                      category: category.type.code,
-                    ),
-                  ),
-                );
-              },
+              title: Text(
+                'No custom categories',
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+              subtitle: const Text('All standard checklists are available above'),
             ),
-          );
-        }).toList(),
+          )
+        else
+          ...categories.map((category) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListTile(
+                title: Text(category.type.fullName),
+                subtitle: Text('Category Code: ${category.type.code}'),
+                trailing: const Icon(Icons.arrow_forward_ios),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ChecklistScreen(
+                        equipmentId: _id,
+                        category: category.type.code,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          }).toList(),
       ],
     );
   }
