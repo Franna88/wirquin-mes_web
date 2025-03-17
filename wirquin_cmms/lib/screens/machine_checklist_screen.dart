@@ -7,799 +7,372 @@ import '../models/checklist_item.dart';
 import '../providers/checklist_provider.dart';
 import '../providers/equipment_provider.dart';
 import 'package:intl/intl.dart';
+import '../data/machine_checklists.dart';
 
-class MachineChecklistScreen extends StatelessWidget {
+class MachineChecklistScreen extends StatefulWidget {
   final String equipmentId;
-  final String machineType;
+  final String machineType; // Currently selected checklist type (IM, BT, TER)
 
   const MachineChecklistScreen({
-    super.key, 
-    required this.equipmentId, 
-    required this.machineType,
-  });
+    Key? key,
+    required this.equipmentId,
+    required this.machineType, 
+  }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: ChecklistFrequency.values.length,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text('$machineType Checklists'),
-          bottom: TabBar(
-            isScrollable: true,
-            tabs: ChecklistFrequency.values.map((frequency) {
-              return Tab(text: frequency.displayName);
-            }).toList(),
-          ),
-        ),
-        body: TabBarView(
-          children: ChecklistFrequency.values.map((frequency) {
-            return _ChecklistTabContent(
-              equipmentId: equipmentId,
-              machineType: machineType,
-              frequency: frequency,
-            );
-          }).toList(),
-        ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () => _addChecklistItem(context),
-          child: const Icon(Icons.add),
-        ),
-      ),
-    );
-  }
-
-  void _addChecklistItem(BuildContext context) {
-    final tabController = DefaultTabController.of(context);
-    final currentFrequency = ChecklistFrequency.values[tabController.index];
-    
-    showDialog(
-      context: context,
-      builder: (context) => _ChecklistItemDialog(
-        equipmentId: equipmentId,
-        category: 'BT', // Using BT for machine-specific checklists
-        frequency: currentFrequency,
-        machineType: machineType,
-      ),
-    );
-  }
+  State<MachineChecklistScreen> createState() => _MachineChecklistScreenState();
 }
 
-class _ChecklistTabContent extends StatelessWidget {
-  final String equipmentId;
-  final String machineType;
-  final ChecklistFrequency frequency;
+class _MachineChecklistScreenState extends State<MachineChecklistScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  Map<ChecklistFrequency, List<ChecklistItem>> frequencyItems = {};
+  bool isLoading = true;
+  String _selectedType = ''; // Current checklist type (IM, BT, TER)
 
-  const _ChecklistTabContent({
-    required this.equipmentId,
-    required this.machineType,
-    required this.frequency,
-  });
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 5, vsync: this);
+    _selectedType = widget.machineType;
+    _loadChecklists();
+  }
+
+  @override
+  void didUpdateWidget(MachineChecklistScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.machineType != widget.machineType) {
+      setState(() {
+        _selectedType = widget.machineType;
+      });
+      _loadChecklists();
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadChecklists() async {
+    setState(() {
+      isLoading = true;
+    });
+
+    print('🔍 Loading checklists for equipment: ${widget.equipmentId}, type: ${_selectedType}');
+
+    // Initialize frequencies
+    frequencyItems = {
+      ChecklistFrequency.daily: [],
+      ChecklistFrequency.weekly: [],
+      ChecklistFrequency.monthly: [],
+      ChecklistFrequency.quarterly: [],
+      ChecklistFrequency.yearly: [],
+    };
+
+    // Get the checklist provider
+    final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
+    
+    // First, ensure checklists are created for this equipment/machine type
+    print('Creating machine checklists for ${_selectedType}');
+    await checklistProvider.createMachineChecklists(widget.equipmentId, _selectedType);
+    print('Finished creating machine checklists');
+    
+    // Load all frequencies
+    final frequencies = [
+      ChecklistFrequency.daily,
+      ChecklistFrequency.weekly, 
+      ChecklistFrequency.monthly,
+      ChecklistFrequency.quarterly,
+      ChecklistFrequency.yearly,
+    ];
+
+    for (var frequency in frequencies) {
+      print('Loading ${frequency.toString()} checklists');
+      final items = checklistProvider.getMachineChecklistItems(
+        widget.equipmentId, 
+        _selectedType,
+        frequency,
+      );
+      
+      print('Found ${items.length} ${frequency.toString()} checklist items');
+      
+      // Add all items to the appropriate frequency list
+      for (var item in items) {
+        if (frequencyItems.containsKey(item.frequency)) {
+          frequencyItems[item.frequency]!.add(item);
+        }
+      }
+    }
+
+    // Print summary
+    print('📊 Checklist summary:');
+    frequencyItems.forEach((frequency, items) {
+      print('${frequency.toString()}: ${items.length} items');
+    });
+
+    setState(() {
+      isLoading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final checklistProvider = Provider.of<ChecklistProvider>(context);
-    final equipmentProvider = Provider.of<EquipmentProvider>(context);
-    final equipment = equipmentProvider.getEquipmentById(equipmentId);
-    
-    if (equipment == null) {
-      return const Center(child: Text('Equipment not found'));
-    }
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${_selectedType} Checklists'),
+        actions: [
+          // Add dropdown to switch between checklist types
+          DropdownButton<String>(
+            value: _selectedType,
+            dropdownColor: Theme.of(context).primaryColor,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+            underline: Container(height: 0),
+            onChanged: (String? newValue) {
+              if (newValue != null) {
+                setState(() {
+                  _selectedType = newValue;
+                });
+                _loadChecklists();
+              }
+            },
+            items: ['IM', 'BT', 'TER']
+                .map<DropdownMenuItem<String>>((String value) {
+              return DropdownMenuItem<String>(
+                value: value,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(width: 8),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Daily'),
+            Tab(text: 'Weekly'),
+            Tab(text: 'Monthly'),
+            Tab(text: 'Quarterly'),
+            Tab(text: 'Yearly'),
+          ],
+        ),
+      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildChecklistTab(ChecklistFrequency.daily),
+                _buildChecklistTab(ChecklistFrequency.weekly),
+                _buildChecklistTab(ChecklistFrequency.monthly),
+                _buildChecklistTab(ChecklistFrequency.quarterly),
+                _buildChecklistTab(ChecklistFrequency.yearly),
+              ],
+            ),
+    );
+  }
 
-    // Get all BT items for this frequency as they're machine-specific
-    final items = checklistProvider.getItemsForCategoryAndFrequency(
-      equipmentId,
-      'BT',
-      frequency,
-    ).where((item) => item.notes?.contains(machineType) ?? false).toList();
+  Widget _buildChecklistTab(ChecklistFrequency frequency) {
+    final items = frequencyItems[frequency] ?? [];
 
     if (items.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.engineering,
-              size: 64,
-              color: Colors.grey,
-            ),
+            const Text('No checklist items found for this frequency'),
             const SizedBox(height: 16),
-            Text(
-              'No ${frequency.displayName} checklist items for $machineType',
-              style: const TextStyle(
-                fontSize: 18,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Add items using the + button',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
-              ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                // Generate items for this frequency specifically
+                final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
+                final newItems = MachineChecklists.createChecklistItems(
+                  equipmentId: widget.equipmentId,
+                  machineType: _selectedType,
+                  frequency: frequency,
+                );
+                
+                // Add items to provider
+                for (var item in newItems) {
+                  await checklistProvider.addItem(item);
+                }
+                
+                // Reload checklists
+                _loadChecklists();
+                
+                // Show success message
+                if (context.mounted && newItems.isNotEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Generated ${newItems.length} checklist items!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.add_circle),
+              label: const Text('Generate Checklist Items'),
             ),
           ],
         ),
       );
     }
-
-    // Group by day of week (or date for less frequent items)
-    final groupedItems = _groupItems(items);
-
+    
+    // If items exist, show them
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: groupedItems.length,
-      itemBuilder: (context, groupIndex) {
-        final groupKey = groupedItems.keys.elementAt(groupIndex);
-        final groupItems = groupedItems[groupKey]!;
-        
-        return Column(
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return _buildChecklistItem(item);
+      },
+    );
+  }
+
+  Widget _buildChecklistItem(ChecklistItem item) {
+    return Card(
+      margin: const EdgeInsets.all(8.0),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Text(
-                groupKey,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ...groupItems.map((item) => _buildChecklistItemCard(context, item)),
-            const Divider(thickness: 2),
-          ],
-        );
-      },
-    );
-  }
-
-  Map<String, List<ChecklistItem>> _groupItems(List<ChecklistItem> items) {
-    final now = DateTime.now();
-    final Map<String, List<ChecklistItem>> grouped = {};
-    
-    switch (frequency) {
-      case ChecklistFrequency.daily:
-        // Group by days of the week
-        final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-        
-        for (final day in days) {
-          grouped[day] = [];
-        }
-        
-        for (final item in items) {
-          // If item was completed this week, add it to the specific day
-          if (item.lastCompletedDate != null) {
-            final completedDay = DateFormat('EEEE').format(item.lastCompletedDate!);
-            grouped[completedDay]?.add(item);
-          } else {
-            // Otherwise, add to today's items
-            final today = DateFormat('EEEE').format(now);
-            grouped[today]?.add(item);
-          }
-        }
-        break;
-        
-      case ChecklistFrequency.weekly:
-        // Group by week number
-        final formatter = DateFormat("'Week' w");
-        final thisWeek = formatter.format(now);
-        grouped[thisWeek] = items;
-        break;
-        
-      case ChecklistFrequency.monthly:
-        // Group by month
-        final formatter = DateFormat('MMMM yyyy');
-        final thisMonth = formatter.format(now);
-        grouped[thisMonth] = items;
-        break;
-        
-      case ChecklistFrequency.quarterly:
-        // Group by quarter
-        final quarter = (now.month - 1) ~/ 3 + 1;
-        final quarterLabel = 'Q$quarter ${now.year}';
-        grouped[quarterLabel] = items;
-        break;
-        
-      case ChecklistFrequency.yearly:
-        // Check if items are 6-monthly or yearly
-        grouped['Yearly'] = items.where((item) => 
-          !(item.notes?.contains('6-Monthly') ?? false)).toList();
-        
-        grouped['6-Monthly'] = items.where((item) => 
-          item.notes?.contains('6-Monthly') ?? false).toList();
-        break;
-    }
-    
-    // Remove empty groups
-    grouped.removeWhere((key, value) => value.isEmpty);
-    
-    return grouped;
-  }
-
-  Widget _buildChecklistItemCard(BuildContext context, ChecklistItem item) {
-    final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
-    
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        title: Text(item.description),
-        subtitle: item.lastCompletedDate != null 
-          ? Text('Last completed: ${DateFormat('MMM d, yyyy').format(item.lastCompletedDate!)}')
-          : null,
-        leading: Checkbox(
-          value: item.isCompleted,
-          onChanged: (value) {
-            if (value != null) {
-              checklistProvider.toggleItemCompletion(item.id, value);
-            }
-          },
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (item.result.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _getResultColor(item.result),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  item.result,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            const SizedBox(width: 8),
-            if (item.photoUrl != null && item.photoUrl!.isNotEmpty)
-              IconButton(
-                icon: const Icon(Icons.photo, color: Colors.blue),
-                onPressed: () => _showPhotoDialog(context, item),
-                tooltip: 'View Photo',
-              ),
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => _editChecklistItem(context, item),
-            ),
-          ],
-        ),
-        onTap: () => _showResultEditor(context, item),
-      ),
-    );
-  }
-
-  void _editChecklistItem(BuildContext context, ChecklistItem item) {
-    showDialog(
-      context: context,
-      builder: (context) => _ChecklistItemDialog(
-        equipmentId: equipmentId,
-        category: 'BT',
-        frequency: frequency,
-        existingItem: item,
-        machineType: machineType,
-      ),
-    );
-  }
-
-  void _showResultEditor(BuildContext context, ChecklistItem item) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.description,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Set Result:',
-                style: TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildResultButton(context, item, 'YES'),
-                  _buildResultButton(context, item, 'NO'),
-                  _buildResultButton(context, item, 'GOOD'),
-                  _buildResultButton(context, item, 'DONE'),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        labelText: 'Custom Result (e.g., numerical value)',
-                        border: OutlineInputBorder(),
-                      ),
-                      controller: TextEditingController(text: item.result),
-                      onSubmitted: (value) {
-                        if (value.isNotEmpty) {
-                          _updateItemResult(context, item, value);
-                          Navigator.pop(context);
-                        }
-                      },
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    item.description,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  // Photo button
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _capturePhoto(context, item);
-                    },
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Photo'),
+                ),
+                if (item.lastCompletedDate != null)
+                  Text(
+                    'Last: ${_formatDate(item.lastCompletedDate!)}',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
                   ),
-                ],
-              ),
-              
-              // Display photo if available
-              if (item.photoUrl != null && item.photoUrl!.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _buildPhotoThumbnail(context, item),
               ],
-              
-              const SizedBox(height: 16),
-              TextField(
-                decoration: const InputDecoration(
-                  labelText: 'Comments on the issue',
-                  border: OutlineInputBorder(),
-                  hintText: 'Add detailed notes about this item',
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                // Result input field - could be text or checkbox depending on the type
+                Expanded(
+                  child: TextFormField(
+                    initialValue: item.result,
+                    decoration: InputDecoration(
+                      labelText: 'Result',
+                      hintText: 'Example: ${_getExampleForDescription(item.description)}',
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (value) {
+                      final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
+                      
+                      // Update the result
+                      final updatedItem = item.copyWith(result: value);
+                      checklistProvider.updateItem(updatedItem);
+                    },
+                  ),
                 ),
-                controller: TextEditingController(text: item.notes ?? ''),
-                maxLines: 3,
-                onChanged: (value) {
-                  final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
-                  final updatedItem = item.copyWith(notes: value);
-                  checklistProvider.updateItem(updatedItem);
-                },
+                const SizedBox(width: 8),
+                // Completed checkbox
+                Row(
+                  children: [
+                    const Text('Completed:'),
+                    Checkbox(
+                      value: item.isCompleted,
+                      onChanged: (value) {
+                        final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
+                        final updatedItem = item.copyWith(
+                          isCompleted: value ?? false,
+                          lastCompletedDate: (value ?? false) ? DateTime.now() : null,
+                        );
+                        checklistProvider.updateItem(updatedItem);
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.note),
+              label: const Text('Add Notes'),
+              onPressed: () => _showNotesDialog(context, item),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue[100],
+                foregroundColor: Colors.blue[900],
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildResultButton(BuildContext context, ChecklistItem item, String resultText) {
-    final isSelected = item.result == resultText;
-    return ElevatedButton(
-      onPressed: () {
-        _updateItemResult(context, item, resultText);
-        Navigator.pop(context);
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? _getResultColor(resultText) : null,
-        foregroundColor: isSelected ? Colors.white : null,
-      ),
-      child: Text(resultText),
-    );
-  }
-
-  void _updateItemResult(BuildContext context, ChecklistItem item, String result) {
-    final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
-    final updatedItem = item.copyWith(
-      result: result,
-      isCompleted: true,
-      lastCompletedDate: DateTime.now(),
-    );
-    checklistProvider.updateItem(updatedItem);
-  }
-
-  Color _getResultColor(String result) {
-    switch (result.toUpperCase()) {
-      case 'YES':
-        return Colors.green;
-      case 'NO':
-        return Colors.red;
-      case 'GOOD':
-        return Colors.blue;
-      case 'DONE':
-        return Colors.purple;
-      case 'BAD':
-        return Colors.orange;
-      default:
-        // For numerical values or custom text
-        return Colors.grey.shade700;
-    }
-  }
-
-  Widget _buildPhotoThumbnail(BuildContext context, ChecklistItem item) {
-    if (item.photoUrl == null || item.photoUrl!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return GestureDetector(
-      onTap: () {
-        Navigator.pop(context);
-        _showPhotoDialog(context, item);
-      },
-      child: Container(
-        width: double.infinity,
-        height: 120,
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: item.photoUrl!.startsWith('data:image')
-              ? Image.memory(
-                  base64Decode(item.photoUrl!.split(',').last),
-                  fit: BoxFit.cover,
-                )
-              : Image.file(
-                  File(item.photoUrl!),
-                  fit: BoxFit.cover,
-                ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  // Show full-size photo in dialog
-  void _showPhotoDialog(BuildContext context, ChecklistItem item) {
-    if (item.photoUrl == null || item.photoUrl!.isEmpty) return;
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  String _getExampleForDescription(String description) {
+    // Look up example from templates
+    for (var frequencyMap in MachineChecklists.templates[_selectedType]!.values) {
+      for (var item in frequencyMap) {
+        if (item['description'] == description) {
+          return item['example'] ?? '';
+        }
+      }
+    }
+    return '';
+  }
+
+  void _showNotesDialog(BuildContext context, ChecklistItem item) {
+    final notesController = TextEditingController(text: item.notes);
     
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AppBar(
-              title: Text(item.description),
-              automaticallyImplyLeading: false,
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            Flexible(
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      if (item.photoUrl!.startsWith('data:image'))
-                        Image.memory(
-                          base64Decode(item.photoUrl!.split(',').last),
-                          fit: BoxFit.contain,
-                        )
-                      else
-                        Image.file(
-                          File(item.photoUrl!),
-                          fit: BoxFit.contain,
-                        ),
-                      const SizedBox(height: 16),
-                      if (item.result.isNotEmpty) ...[
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: _getResultColor(item.result),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            'Result: ${item.result}',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      if (item.notes != null && item.notes!.isNotEmpty) ...[
-                        Text(
-                          'Notes: ${item.notes}',
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  TextButton.icon(
-                    onPressed: () {
-                      _capturePhoto(context, item);
-                      Navigator.pop(context);
-                    },
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Replace'),
-                  ),
-                  TextButton.icon(
-                    onPressed: () {
-                      final checklistProvider = 
-                          Provider.of<ChecklistProvider>(context, listen: false);
-                      final updatedItem = item.copyWith(photoUrl: null);
-                      checklistProvider.updateItem(updatedItem);
-                      Navigator.pop(context);
-                    },
-                    icon: const Icon(Icons.delete),
-                    label: const Text('Remove'),
-                    style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Capture a new photo
-  Future<void> _capturePhoto(BuildContext context, ChecklistItem item) async {
-    final ImagePicker picker = ImagePicker();
-    final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
-    
-    try {
-      // Show options to choose camera or gallery
-      final source = await showDialog<ImageSource>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Select Image Source'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('Camera'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('Gallery'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      );
-      
-      if (source == null) return;
-      
-      final XFile? pickedFile = await picker.pickImage(
-        source: source,
-        maxWidth: 1200,
-        maxHeight: 1200,
-        imageQuality: 85,
-      );
-      
-      if (pickedFile != null) {
-        // For web, we need to store as data URL
-        if (pickedFile.path.startsWith('http') || pickedFile.path.startsWith('blob')) {
-          final bytes = await pickedFile.readAsBytes();
-          final base64Image = base64Encode(bytes);
-          final dataUrl = 'data:image/jpeg;base64,$base64Image';
-          
-          final updatedItem = item.copyWith(
-            photoUrl: dataUrl,
-            isCompleted: true,
-            lastCompletedDate: DateTime.now(),
-          );
-          
-          checklistProvider.updateItem(updatedItem);
-        } else {
-          // For mobile, we can store the file path
-          final updatedItem = item.copyWith(
-            photoUrl: pickedFile.path,
-            isCompleted: true,
-            lastCompletedDate: DateTime.now(),
-          );
-          
-          checklistProvider.updateItem(updatedItem);
-        }
-      }
-    } catch (e) {
-      // Show error message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error capturing photo: $e')),
-      );
-    }
-  }
-}
-
-class _ChecklistItemDialog extends StatefulWidget {
-  final String equipmentId;
-  final String category;
-  final ChecklistFrequency frequency;
-  final ChecklistItem? existingItem;
-  final String machineType;
-
-  const _ChecklistItemDialog({
-    required this.equipmentId,
-    required this.category,
-    required this.frequency,
-    this.existingItem,
-    required this.machineType,
-  });
-
-  @override
-  State<_ChecklistItemDialog> createState() => _ChecklistItemDialogState();
-}
-
-class _ChecklistItemDialogState extends State<_ChecklistItemDialog> {
-  late ChecklistFrequency _frequency;
-  final _descriptionController = TextEditingController();
-  final _notesController = TextEditingController();
-  final _resultController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-
-  @override
-  void initState() {
-    super.initState();
-    _frequency = widget.frequency;
-    
-    if (widget.existingItem != null) {
-      _descriptionController.text = widget.existingItem!.description;
-      if (widget.existingItem!.notes != null) {
-        _notesController.text = widget.existingItem!.notes!;
-      }
-      _resultController.text = widget.existingItem!.result;
-    } else {
-      // For new items, pre-fill the notes with machine type
-      _notesController.text = '${widget.machineType} Machine';
-    }
-  }
-
-  @override
-  void dispose() {
-    _descriptionController.dispose();
-    _notesController.dispose();
-    _resultController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existingItem != null 
-        ? 'Edit Checklist Item' 
-        : 'Add Checklist Item'
-      ),
-      content: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DropdownButtonFormField<ChecklistFrequency>(
-                decoration: const InputDecoration(
-                  labelText: 'Frequency',
-                ),
-                value: _frequency,
-                items: ChecklistFrequency.values.map((frequency) {
-                  return DropdownMenuItem(
-                    value: frequency,
-                    child: Text(frequency.displayName),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _frequency = value;
-                    });
-                  }
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _descriptionController,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter a description';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _notesController,
-                decoration: const InputDecoration(
-                  labelText: 'Notes',
-                ),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _resultController,
-                decoration: const InputDecoration(
-                  labelText: 'Result (e.g., YES, NO, GOOD, DONE, or numerical value)',
-                ),
-              ),
-            ],
+      builder: (context) => AlertDialog(
+        title: const Text('Notes'),
+        content: TextField(
+          controller: notesController,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Enter notes about this checklist item',
+            border: OutlineInputBorder(),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
+              final updatedItem = item.copyWith(notes: notesController.text);
+              checklistProvider.updateItem(updatedItem);
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: _saveChecklistItem,
-          child: const Text('Save'),
-        ),
-      ],
     );
-  }
-
-  void _saveChecklistItem() {
-    if (_formKey.currentState!.validate()) {
-      final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
-      
-      if (widget.existingItem != null) {
-        // Update existing item
-        final updatedItem = widget.existingItem!.copyWith(
-          frequency: _frequency,
-          description: _descriptionController.text,
-          notes: _notesController.text,
-          result: _resultController.text,
-        );
-        checklistProvider.updateItem(updatedItem);
-      } else {
-        // Add new item
-        final newItem = ChecklistItem(
-          equipmentId: widget.equipmentId,
-          categoryName: widget.category,
-          frequency: _frequency,
-          description: _descriptionController.text,
-          notes: _notesController.text,
-          result: _resultController.text,
-        );
-        checklistProvider.addItem(newItem);
-      }
-      
-      Navigator.of(context).pop();
-    }
   }
 } 

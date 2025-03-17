@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import '../providers/checklist_provider.dart';
 import 'package:uuid/uuid.dart';
+import '../data/machine_checklists.dart';
 
 class EquipmentProvider extends ChangeNotifier {
   List<Equipment> _equipmentList = [];
@@ -159,48 +160,87 @@ class EquipmentProvider extends ChangeNotifier {
     _setLoading(true);
     
     try {
-      final index = _equipmentList.indexWhere((e) => e.id == equipment.id);
-      bool isNewEquipment = index < 0;
+      // Check if this is an update or a new item
+      final existingIndex = _equipmentList.indexWhere((e) => e.id == equipment.id);
       
-      if (index >= 0) {
+      if (existingIndex >= 0) {
         // Update existing equipment
-        _equipmentList[index] = equipment;
+        final oldStatus = _equipmentList[existingIndex].status;
+        final newStatus = equipment.status;
+        
+        if (oldStatus != newStatus) {
+          debugPrint('🔄 Status changed for ${equipment.name} from "$oldStatus" to "$newStatus"');
+        }
+        
+        _equipmentList[existingIndex] = equipment;
+        debugPrint('Updated equipment: ${equipment.name}, Status: ${equipment.status}');
       } else {
         // Add new equipment
         _equipmentList.add(equipment);
+        debugPrint('Added new equipment: ${equipment.name}, Status: ${equipment.status}');
         
         // Create default maintenance categories for new equipment
-        // (only if they don't already exist)
         await _createDefaultMaintenanceCategories(equipment.id);
-        
-        // Schedule a delayed task to add default checklist items
-        Future.delayed(const Duration(seconds: 1), () {
-          // Access ChecklistProvider without BuildContext
-          final context = WidgetsBinding.instance.renderViewElement;
-          if (context != null) {
-            try {
-              final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
-              checklistProvider.addDefaultChecklistItems(equipment.id);
-              debugPrint('Added default checklist items for new equipment: ${equipment.name}');
-            } catch (e) {
-              debugPrint('Error adding default checklist items: $e');
-            }
-          }
-        });
       }
       
       await _saveData();
-      
-      // If this is new equipment, we should add default checklists immediately
-      if (isNewEquipment) {
-        await addInjectionMouldingChecklists(equipment.id);
-      }
     } catch (e) {
       _error = 'Error adding/updating equipment: $e';
       debugPrint(_error);
     } finally {
       _setLoading(false);
     }
+  }
+
+  // Helper method to add checklists directly (bypassing ChecklistProvider)
+  Future<void> addChecklistsDirectly(String equipmentId, String categoryType, List<ChecklistItem> items) async {
+    debugPrint('Adding ${items.length} $categoryType checklist items directly');
+    
+    // Find the category for this type
+    String categoryId = '';
+    switch(categoryType) {
+      case 'IM':
+        categoryId = '${equipmentId}_IM';
+        break;
+      case 'BT':
+        categoryId = '${equipmentId}_BT';
+        break;
+      case 'TER':
+        categoryId = '${equipmentId}_TER';
+        break;
+    }
+    
+    // Find the category
+    final categoryIndex = _maintenanceCategories.indexWhere((c) => c.id == categoryId);
+    if (categoryIndex < 0) {
+      debugPrint('Category not found: $categoryId');
+      return;
+    }
+    
+    // Update category with the items
+    var category = _maintenanceCategories[categoryIndex];
+    final updatedChecklists = Map<ChecklistFrequency, List<ChecklistItem>>.from(category.checklists);
+    
+    // Group items by frequency
+    for (var item in items) {
+      if (!updatedChecklists.containsKey(item.frequency)) {
+        updatedChecklists[item.frequency] = [];
+      }
+      updatedChecklists[item.frequency]!.add(item);
+    }
+    
+    // Create updated category
+    final updatedCategory = MaintenanceCategory(
+      id: category.id,
+      equipmentId: category.equipmentId,
+      type: category.type,
+      checklists: updatedChecklists,
+    );
+    
+    // Update the category
+    _maintenanceCategories[categoryIndex] = updatedCategory;
+    
+    debugPrint('✅ Directly added checklist items to category $categoryId');
   }
 
   // Delete equipment
@@ -322,25 +362,12 @@ class EquipmentProvider extends ChangeNotifier {
     try {
       final sampleEquipment = [
         Equipment(
-          id: 'equipment_ext_001',
-          name: 'Extruder Machine 1',
+          id: 'equipment_im_001',
+          name: 'Injection Moulding Machine 1',
           location: 'Production Floor A',
           department: 'Production',
-          machineType: 'Extruder',
-          serialNumber: 'EXT-2023-001',
-          manufacturer: 'ExtruTech',
-          model: 'EX-5000',
-          installationDate: '2023-01-15',
-          lastMaintenanceDate: '2023-04-20',
-          status: 'Operational',
-        ),
-        Equipment(
-          id: 'equipment_inj_002',
-          name: 'Injection Moulding Machine 2',
-          location: 'Production Floor B',
-          department: 'Production',
-          machineType: 'Injection Moulding',
-          serialNumber: 'INJ-2023-002',
+          machineType: 'General',
+          serialNumber: 'IM-2023-001',
           manufacturer: 'MoldMaster',
           model: 'IM-800',
           installationDate: '2023-02-10',
@@ -348,29 +375,42 @@ class EquipmentProvider extends ChangeNotifier {
           status: 'Operational',
         ),
         Equipment(
-          id: 'equipment_pkg_003',
-          name: 'Packaging Line 3',
-          location: 'Packaging Area',
-          department: 'Packaging',
-          machineType: 'Packaging',
-          serialNumber: 'PKG-2023-003',
-          manufacturer: 'PackSys',
-          model: 'PL-2000',
-          installationDate: '2023-03-05',
-          lastMaintenanceDate: '2023-06-01',
+          id: 'equipment_bt_002',
+          name: 'Bettatec Machine 2',
+          location: 'Production Floor B',
+          department: 'Production',
+          machineType: 'General',
+          serialNumber: 'BT-2023-002',
+          manufacturer: 'BettatechSys',
+          model: 'BT-3000',
+          installationDate: '2023-03-15',
+          lastMaintenanceDate: '2023-06-12',
           status: 'Operational',
         ),
         Equipment(
-          id: 'equipment_cnc_004',
-          name: 'CNC Machine 4',
-          location: 'Machining Area',
-          department: 'Machining',
-          machineType: 'CNC',
-          serialNumber: 'CNC-2023-004',
-          manufacturer: 'CNCTech',
-          model: 'CNC-X500',
+          id: 'equipment_ter_003',
+          name: 'Terrestrial Machine 3',
+          location: 'Production Floor C',
+          department: 'Production',
+          machineType: 'General',
+          serialNumber: 'TER-2023-003',
+          manufacturer: 'TerraTech',
+          model: 'T-5000',
           installationDate: '2023-04-20',
-          lastMaintenanceDate: '2023-06-15',
+          lastMaintenanceDate: '2023-07-15',
+          status: 'Operational',
+        ),
+        Equipment(
+          id: 'equipment_im_004',
+          name: 'Injection Moulding Machine 4',
+          location: 'Production Floor D',
+          department: 'Production',
+          machineType: 'General',
+          serialNumber: 'IM-2023-004',
+          manufacturer: 'MoldMaster',
+          model: 'IM-1200',
+          installationDate: '2023-05-25',
+          lastMaintenanceDate: '2023-08-18',
           status: 'Operational',
         ),
       ];
@@ -392,7 +432,32 @@ class EquipmentProvider extends ChangeNotifier {
       // Now add checklists to each equipment with a small delay between each
       for (var equipment in sampleEquipment) {
         debugPrint('Adding checklists to ${equipment.name}');
-        await addInjectionMouldingChecklists(equipment.id);
+        
+        // Create all three types of checklists (IM, BT, TER) for each machine
+        final machineTypes = ['IM', 'BT', 'TER'];
+        for (final type in machineTypes) {
+          debugPrint('Generating $type checklists for ${equipment.name}');
+          final items = MachineChecklists.initializeAllChecklistsForMachine(equipment.id, type);
+          
+          // Try to access the ChecklistProvider to add these items
+          final context = WidgetsBinding.instance.renderViewElement;
+          if (context != null) {
+            try {
+              final checklistProvider = Provider.of<ChecklistProvider>(context, listen: false);
+              for (var item in items) {
+                await checklistProvider.addItem(item);
+              }
+              debugPrint('✅ Added ${items.length} $type checklist items to ${equipment.name}');
+            } catch (e) {
+              debugPrint('Error adding checklist items: $e');
+              // Alternative approach: directly update the equipment provider's maintenance categories
+              await addChecklistsDirectly(equipment.id, type, items);
+            }
+          } else {
+            // Fallback if context is not available
+            await addChecklistsDirectly(equipment.id, type, items);
+          }
+        }
       }
       
       debugPrint('Added ${sampleEquipment.length} sample equipment items');
@@ -868,23 +933,32 @@ class EquipmentProvider extends ChangeNotifier {
   
   // Reload all data (for use with reset functionality)
   Future<void> reloadData() async {
-    debugPrint('Reloading equipment data...');
+    _setLoading(true);
     
-    // Clear current data
-    _equipmentList = [];
-    _maintenanceCategories = [];
+    try {
+      debugPrint('📊 Reloading equipment data...');
+      // Clear and reload data
+      _equipmentList.clear();
+      
+      // Use the existing _loadData method instead of direct DB access
+      await _loadData();
+      
+      debugPrint('📊 Reloaded ${_equipmentList.length} equipment items');
+      for (var equipment in _equipmentList) {
+        debugPrint('Loaded: ${equipment.name}, Status: ${equipment.status}');
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error reloading equipment data: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  void refreshData() {
+    debugPrint('📊 Refreshing equipment data...');
     notifyListeners();
-    
-    // Reload data from storage (or add sample data if none exists)
-    await _loadData();
-    
-    // Make sure there are no duplicate categories
-    await removeDuplicateCategories();
-    
-    // Notify listeners that data has been reloaded
-    notifyListeners();
-    
-    debugPrint('Equipment data reloaded');
   }
 
   // Remove duplicate maintenance categories for all equipment

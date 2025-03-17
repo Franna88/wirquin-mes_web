@@ -9,6 +9,7 @@ import 'screens/role_selection_screen.dart';
 import 'models/maintenance_category.dart';
 import 'models/checklist_item.dart';
 import 'helpers/reset_data.dart';
+import 'data/machine_checklists.dart';
 
 void main() {
   runApp(const MyApp());
@@ -89,14 +90,13 @@ class DevOptionsWrapper extends StatelessWidget {
       body: child,
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          // Show dialog to confirm reset
-          final shouldReset = await showDialog<bool>(
+          // Show dialog to enter machine details
+          final shouldCreate = await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: const Text('Reset Application Data'),
+              title: const Text('Create New Machine'),
               content: const Text(
-                'This will delete all equipment, checklists, and categories. ' +
-                'The app will reload with sample data. Continue?'
+                'This will create a new machine with all three checklist types (IM, BT, and TER).'
               ),
               actions: [
                 TextButton(
@@ -105,32 +105,38 @@ class DevOptionsWrapper extends StatelessWidget {
                 ),
                 ElevatedButton(
                   onPressed: () => Navigator.of(ctx).pop(true),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  child: const Text('Reset Data'),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  child: const Text('Create Machine'),
                 ),
               ],
             ),
           ) ?? false;
           
-          if (shouldReset) {
+          if (shouldCreate) {
             // Get the equipment provider
             final equipmentProvider = Provider.of<EquipmentProvider>(context, listen: false);
             
-            // Reset and reload the data
-            await resetAndReload(equipmentProvider);
+            // Create a new machine
+            await createNewMachineWithChecklists(
+              equipmentProvider,
+              'Production Machine ${DateTime.now().millisecondsSinceEpoch.toString().substring(8, 12)}',
+              'Machine',
+              'Production Floor'
+            );
             
             // Show success message
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Data reset and reloaded with fresh sample data!'),
+                content: Text('New machine created with default checklists!'),
                 backgroundColor: Colors.green,
               ),
             );
           }
         },
-        tooltip: 'Reset App Data',
-        backgroundColor: Colors.red,
-        child: const Icon(Icons.refresh),
+        tooltip: 'Create Machine',
+        heroTag: 'createMachine',
+        backgroundColor: Colors.green,
+        child: const Icon(Icons.add),
       ),
     );
   }
